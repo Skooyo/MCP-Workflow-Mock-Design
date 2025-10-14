@@ -139,7 +139,7 @@ WHERE product_name = 'Wireless Mouse';`,
     if (messages.length > 0) {
       setMessageHistory((prev) => [...prev, messages])
       setMessages((prev) => prev.slice(0, -2))
-      setQueryResults((prev) => new Map(prev).clear())
+      setQueryResults(() => new Map())
       console.log("[v0] Undid last query")
     }
   }
