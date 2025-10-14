@@ -6,7 +6,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Card } from "@/components/ui/card"
-import { Send, Sparkles, Database, Check, Undo, RefreshCw, AlertCircle, Info } from "lucide-react"
+import { Send, Sparkles, Database, Undo, RefreshCw, AlertCircle, Info, Play, X, Check, Eye } from "lucide-react"
 
 interface TableData {
   headers: string[]
@@ -24,7 +24,17 @@ interface Message {
   }
 }
 
+interface QueryResult {
+  headers: string[]
+  rows: (string | number)[][]
+  rowCount: number
+  executedAt: string
+}
+
+type DatabaseType = "SQL" | "MongoDB" | "PostgreSQL" | "MySQL"
+
 export function QueryInterface() {
+  const [selectedDatabase, setSelectedDatabase] = useState<DatabaseType>("SQL")
   const [userInput, setUserInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -47,18 +57,6 @@ WHERE o.order_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
 GROUP BY c.customer_id, c.first_name, c.last_name, c.email
 ORDER BY total_spent DESC;`,
       explanation: `This query retrieves high-value customers from the last month. It joins the customers and orders tables, filters for orders over $1000 made in the past 30 days, then groups by customer to calculate their total spending and order count. Results are sorted by total spending in descending order to show the biggest spenders first.`,
-      tableVisualization: {
-        after: {
-          headers: ["customer_id", "first_name", "last_name", "email", "total_spent", "order_count"],
-          rows: [
-            [1001, "Sarah", "Johnson", "sarah.j@email.com", 3450.0, 3],
-            [1045, "Michael", "Chen", "m.chen@email.com", 2890.5, 2],
-            [1023, "Emma", "Williams", "emma.w@email.com", 2150.0, 2],
-            [1067, "James", "Brown", "j.brown@email.com", 1875.25, 1],
-          ],
-        },
-        title: "Query Results (4 rows)",
-      },
     },
     {
       role: "user",
@@ -86,20 +84,86 @@ WHERE product_name = 'Wireless Mouse';`,
   ])
   const [isGenerating, setIsGenerating] = useState(false)
   const [confirmedQueries, setConfirmedQueries] = useState<Set<number>>(new Set())
+  const [queryResults, setQueryResults] = useState<Map<number, QueryResult>>(new Map())
   const [messageHistory, setMessageHistory] = useState<Message[][]>([])
   const [selectedExplanationIndex, setSelectedExplanationIndex] = useState<number | null>(null)
+  const [showResultsPopup, setShowResultsPopup] = useState(false)
+  const [popupQueryIndex, setPopupQueryIndex] = useState<number | null>(null)
 
-  const handleConfirm = (index: number) => {
+  const handleRunQuery = (index: number) => {
     setConfirmedQueries((prev) => new Set(prev).add(index))
-    console.log("[v0] Query confirmed:", messages[index].content)
+
+    const message = messages[index]
+    const isSelectQuery = message.content.trim().toUpperCase().startsWith("SELECT")
+    const isUpdateQuery = message.content.trim().toUpperCase().startsWith("UPDATE")
+
+    setTimeout(() => {
+      let mockResult: QueryResult
+
+      if (isSelectQuery) {
+        mockResult = {
+          headers: ["customer_id", "first_name", "last_name", "email", "total_spent", "order_count"],
+          rows: [
+            [1001, "Sarah", "Johnson", "sarah.j@email.com", 3450.0, 3],
+            [1045, "Michael", "Chen", "m.chen@email.com", 2890.5, 2],
+            [1023, "Emma", "Williams", "emma.w@email.com", 2150.0, 2],
+            [1067, "James", "Brown", "j.brown@email.com", 1875.25, 1],
+          ],
+          rowCount: 4,
+          executedAt: new Date().toLocaleString(),
+        }
+      } else if (isUpdateQuery) {
+        mockResult = {
+          headers: ["Status"],
+          rows: [["1 row(s) affected"]],
+          rowCount: 1,
+          executedAt: new Date().toLocaleString(),
+        }
+      } else {
+        mockResult = {
+          headers: ["Result"],
+          rows: [["Query executed successfully"]],
+          rowCount: 1,
+          executedAt: new Date().toLocaleString(),
+        }
+      }
+
+      setQueryResults((prev) => new Map(prev).set(index, mockResult))
+      setPopupQueryIndex(index)
+      setShowResultsPopup(true)
+      console.log("[v0] Query executed:", message.content)
+    }, 800)
   }
 
   const handleUndo = () => {
     if (messages.length > 0) {
       setMessageHistory((prev) => [...prev, messages])
-      setMessages((prev) => prev.slice(0, -2)) // Remove last user message and assistant response
+      setMessages((prev) => prev.slice(0, -2))
+      setQueryResults((prev) => new Map(prev).clear())
       console.log("[v0] Undid last query")
     }
+  }
+
+  const handleConfirmFromPopup = () => {
+    setShowResultsPopup(false)
+    setPopupQueryIndex(null)
+  }
+
+  const handleUndoFromPopup = () => {
+    if (popupQueryIndex !== null) {
+      setConfirmedQueries((prev) => {
+        const newSet = new Set(prev)
+        newSet.delete(popupQueryIndex)
+        return newSet
+      })
+      setQueryResults((prev) => {
+        const newMap = new Map(prev)
+        newMap.delete(popupQueryIndex)
+        return newMap
+      })
+    }
+    setShowResultsPopup(false)
+    setPopupQueryIndex(null)
   }
 
   const handleRegenerate = (userMessageIndex: number) => {
@@ -115,7 +179,7 @@ WHERE o.order_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
   AND o.total_amount > 1000
 GROUP BY c.customer_id, c.email;`
 
-      const mockExplanation = `This is an alternative approach to the same query. It uses a simpler JOIN syntax and focuses on essential fields for better performance.`
+      const mockExplanation = `This query retrieves the top 10 customers by order value from the last 30 days. It joins the users and orders tables, filters for recent orders, and sorts by total amount in descending order.`
 
       setMessages((prev) => {
         const newMessages = [...prev]
@@ -163,17 +227,6 @@ LIMIT 10;`
         role: "assistant",
         content: mockSQLQuery,
         explanation: mockExplanation,
-        tableVisualization: {
-          after: {
-            headers: ["name", "total", "created_at"],
-            rows: [
-              ["Alice Cooper", 1250.0, "2025-01-05"],
-              ["Bob Smith", 980.5, "2025-01-03"],
-              ["Carol White", 875.25, "2025-01-06"],
-            ],
-          },
-          title: "Query Results (3 rows shown)",
-        },
       }
 
       setMessages((prev) => [...prev, assistantMessage])
@@ -191,12 +244,12 @@ LIMIT 10;`
   const TableVisualization = ({ data, label }: { data: TableData; label?: string }) => (
     <div className="space-y-2">
       {label && <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>}
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
-          <thead className="bg-secondary/50">
+          <thead className="bg-secondary">
             <tr>
               {data.headers.map((header, idx) => (
-                <th key={idx} className="px-4 py-2 text-left font-semibold text-foreground border-b border-border">
+                <th key={idx} className="px-4 py-3 text-left font-semibold text-foreground border-b border-border">
                   {header}
                 </th>
               ))}
@@ -204,9 +257,9 @@ LIMIT 10;`
           </thead>
           <tbody>
             {data.rows.map((row, rowIdx) => (
-              <tr key={rowIdx} className="border-b border-border last:border-0 hover:bg-secondary/30">
+              <tr key={rowIdx} className="border-b border-border last:border-0 hover:bg-secondary/50 transition-colors">
                 {row.map((cell, cellIdx) => (
-                  <td key={cellIdx} className="px-4 py-2 text-muted-foreground font-mono text-xs">
+                  <td key={cellIdx} className="px-4 py-3 text-muted-foreground font-mono text-xs">
                     {cell}
                   </td>
                 ))}
@@ -224,34 +277,158 @@ LIMIT 10;`
 
   return (
     <div className="space-y-6">
-      {/* Dual Panel Layout */}
+      {showResultsPopup && popupQueryIndex !== null && queryResults.has(popupQueryIndex) && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <Card className="bg-card border border-border p-6 max-w-5xl w-full max-h-[85vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Database className="w-5 h-5 text-primary" />
+                </div>
+                <h2 className="text-xl font-semibold text-foreground">Query Results</h2>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowResultsPopup(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+
+            <div className="space-y-6">
+              <div className="bg-secondary/50 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-foreground">Execution Summary</h3>
+                  <span className="text-xs text-muted-foreground">{queryResults.get(popupQueryIndex)!.executedAt}</span>
+                </div>
+                <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Rows Affected:</span>
+                    <span className="text-lg font-semibold text-foreground">
+                      {queryResults.get(popupQueryIndex)!.rowCount}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Status:</span>
+                    <span className="text-sm font-semibold text-[var(--success-green)]">Success</span>
+                  </div>
+                </div>
+              </div>
+
+              {messages[popupQueryIndex].tableVisualization?.before &&
+              messages[popupQueryIndex].tableVisualization?.after ? (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-foreground">Before & After Comparison</h3>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <TableVisualization data={messages[popupQueryIndex].tableVisualization!.before!} label="Before" />
+                    <TableVisualization data={messages[popupQueryIndex].tableVisualization!.after!} label="After" />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-foreground">Result Set</h3>
+                  <div className="overflow-x-auto rounded-lg border border-border bg-card">
+                    <table className="w-full text-sm">
+                      <thead className="bg-secondary">
+                        <tr>
+                          {queryResults.get(popupQueryIndex)!.headers.map((header, idx) => (
+                            <th
+                              key={idx}
+                              className="px-4 py-3 text-left font-semibold text-foreground border-b border-border"
+                            >
+                              {header}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {queryResults.get(popupQueryIndex)!.rows.map((row, rowIdx) => (
+                          <tr
+                            key={rowIdx}
+                            className="border-b border-border last:border-0 hover:bg-secondary/50 transition-colors"
+                          >
+                            {row.map((cell, cellIdx) => (
+                              <td key={cellIdx} className="px-4 py-3 text-muted-foreground font-mono text-sm">
+                                {cell}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-4 border-t border-border">
+                <Button
+                  onClick={handleConfirmFromPopup}
+                  className="flex-1 bg-[var(--success-green)] hover:bg-[var(--success-green)]/90 text-white font-medium"
+                >
+                  <Check className="w-4 h-4 mr-2" />
+                  Confirm Changes
+                </Button>
+                <Button
+                  onClick={handleUndoFromPopup}
+                  variant="outline"
+                  className="flex-1 font-medium border-[var(--warning-amber)] text-[var(--warning-amber)] hover:bg-[var(--warning-amber)] hover:text-white bg-transparent"
+                >
+                  <Undo className="w-4 h-4 mr-2" />
+                  Undo Query
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      <Card className="bg-card border border-border p-4 shadow-sm">
+        <div className="flex items-center gap-4">
+          <Database className="w-5 h-5 text-primary" />
+          <span className="text-sm font-medium text-foreground">Database Type:</span>
+          <div className="flex gap-2 flex-wrap">
+            {(["SQL", "MongoDB", "PostgreSQL", "MySQL"] as DatabaseType[]).map((db) => (
+              <Button
+                key={db}
+                size="sm"
+                variant={selectedDatabase === db ? "default" : "outline"}
+                onClick={() => setSelectedDatabase(db)}
+                className={`text-xs font-medium ${
+                  selectedDatabase === db
+                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {db}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left Panel - User Input */}
-        <Card className="bg-card border-2 border-primary/40 p-6 flex flex-col shadow-[0_0_15px_rgba(120,255,120,0.3)]">
-          <div className="flex items-center gap-2 mb-4 pb-3 border-b-2 border-primary/30">
-            <Sparkles className="w-5 h-5 text-primary drop-shadow-[0_0_8px_rgba(120,255,120,0.8)]" />
-            <h2 className="text-lg font-bold text-primary uppercase tracking-wider font-mono">Your Prompt</h2>
+        <Card className="bg-card border border-border p-6 flex flex-col shadow-sm">
+          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
+            <Sparkles className="w-5 h-5 text-primary" />
+            <h2 className="text-lg font-semibold text-foreground">Your Prompt</h2>
           </div>
 
-          <div className="flex-1 overflow-y-auto mb-4 space-y-4 h-[50vh] max-h-[50vh]">
+          <div className="flex-1 overflow-y-auto mb-4 space-y-3 h-[50vh] max-h-[50vh]">
             {messages
               .filter((m) => m.role === "user")
               .map((message, idx) => (
-                <div
-                  key={idx}
-                  className="bg-secondary border-2 border-primary/30 rounded p-4 text-foreground shadow-[0_0_10px_rgba(120,255,120,0.2)]"
-                >
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap font-mono">{message.content}</p>
+                <div key={idx} className="bg-secondary/50 rounded-lg p-4 text-foreground">
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
                 </div>
               ))}
             {messages.filter((m) => m.role === "user").length === 0 && (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                <p className="text-center font-mono">
-                  {">"} Start by describing the data you need...
+                <p className="text-center">
+                  Start by describing the data you need...
                   <br />
-                  <span className="text-xs mt-2 block">
-                    {">"} Example: "Get all users who signed up in the last month"
-                  </span>
+                  <span className="text-xs mt-2 block">Example: "Get all users who signed up in the last month"</span>
                 </p>
               </div>
             )}
@@ -262,13 +439,13 @@ LIMIT 10;`
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="> Describe the query you need... (Press Enter to send)"
-              className="min-h-[100px] bg-input border-2 border-primary/30 text-foreground placeholder:text-muted-foreground resize-none font-mono focus:border-primary focus:shadow-[0_0_10px_rgba(120,255,120,0.4)]"
+              placeholder="Describe the query you need... (Press Enter to send)"
+              className="min-h-[100px] bg-input border border-border text-foreground placeholder:text-muted-foreground resize-none focus:border-primary"
             />
             <Button
               onClick={handleSubmit}
               disabled={!userInput.trim() || isGenerating}
-              className="w-full bg-[var(--retro-green)] hover:bg-[var(--retro-green)]/80 text-background font-bold uppercase tracking-wide border-2 border-[var(--retro-green)] shadow-[0_0_15px_rgba(120,255,120,0.5)] font-mono"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
             >
               {isGenerating ? (
                 <>
@@ -285,11 +462,10 @@ LIMIT 10;`
           </div>
         </Card>
 
-        {/* Right Panel - SQL Output */}
-        <Card className="bg-card border-2 border-accent/40 p-6 flex flex-col shadow-[0_0_15px_rgba(255,200,100,0.3)]">
-          <div className="flex items-center gap-2 mb-4 pb-3 border-b-2 border-accent/30">
-            <Database className="w-5 h-5 text-accent drop-shadow-[0_0_8px_rgba(255,200,100,0.8)]" />
-            <h2 className="text-lg font-bold text-accent uppercase tracking-wider font-mono">Generated SQL</h2>
+        <Card className="bg-card border border-border p-6 flex flex-col shadow-sm">
+          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
+            <Database className="w-5 h-5 text-accent" />
+            <h2 className="text-lg font-semibold text-foreground">Generated {selectedDatabase} Query</h2>
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-4 h-[50vh] max-h-[50vh]">
@@ -298,12 +474,13 @@ LIMIT 10;`
               .map((message, idx) => {
                 const actualIndex = messages.findIndex((m) => m === message)
                 const isConfirmed = confirmedQueries.has(actualIndex)
+                const hasResults = queryResults.has(actualIndex)
                 const userMessageIndex = actualIndex - 1
 
                 return (
                   <div key={idx} className="space-y-3">
-                    <div className="bg-secondary border-2 border-accent/30 rounded p-4 overflow-x-auto shadow-[0_0_10px_rgba(255,200,100,0.2)]">
-                      <pre className="text-sm font-mono text-accent leading-relaxed drop-shadow-[0_0_5px_rgba(255,200,100,0.6)]">
+                    <div className="bg-secondary/50 rounded-lg p-4 overflow-x-auto">
+                      <pre className="text-sm font-mono text-foreground leading-relaxed">
                         <code>{message.content}</code>
                       </pre>
                     </div>
@@ -312,24 +489,39 @@ LIMIT 10;`
                       <Button
                         size="sm"
                         variant={isConfirmed ? "default" : "outline"}
-                        onClick={() => handleConfirm(actualIndex)}
+                        onClick={() => handleRunQuery(actualIndex)}
                         disabled={isConfirmed}
-                        className={`text-xs font-bold uppercase font-mono border-2 ${
+                        className={`text-xs font-medium ${
                           isConfirmed
-                            ? "bg-[var(--retro-green)] border-[var(--retro-green)] text-background shadow-[0_0_10px_rgba(120,255,120,0.5)]"
-                            : "border-[var(--retro-green)] text-[var(--retro-green)] hover:bg-[var(--retro-green)] hover:text-background"
+                            ? "bg-[var(--success-green)] text-white hover:bg-[var(--success-green)]/90"
+                            : "border-[var(--success-green)] text-[var(--success-green)] hover:bg-[var(--success-green)] hover:text-white"
                         }`}
                       >
-                        <Check className="w-3 h-3 mr-1" />
-                        {isConfirmed ? "Confirmed" : "Confirm"}
+                        <Play className="w-3 h-3 mr-1" />
+                        {isConfirmed ? "Executed" : "Run Query"}
                       </Button>
+
+                      {hasResults && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setPopupQueryIndex(actualIndex)
+                            setShowResultsPopup(true)
+                          }}
+                          className="text-xs font-medium border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+                        >
+                          <Eye className="w-3 h-3 mr-1" />
+                          Show Results
+                        </Button>
+                      )}
 
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => handleRegenerate(userMessageIndex)}
                         disabled={isGenerating}
-                        className="text-xs font-bold uppercase font-mono border-2 border-[var(--retro-blue)] text-[var(--retro-blue)] hover:bg-[var(--retro-blue)] hover:text-background"
+                        className="text-xs font-medium border-[var(--info-blue)] text-[var(--info-blue)] hover:bg-[var(--info-blue)] hover:text-white"
                       >
                         <RefreshCw className="w-3 h-3 mr-1" />
                         Regenerate
@@ -339,7 +531,7 @@ LIMIT 10;`
                         size="sm"
                         variant="outline"
                         onClick={() => handleReportError(actualIndex)}
-                        className="text-xs font-bold uppercase font-mono border-2 border-[var(--retro-red)] text-[var(--retro-red)] hover:bg-[var(--retro-red)] hover:text-background"
+                        className="text-xs font-medium border-[var(--error-red)] text-[var(--error-red)] hover:bg-[var(--error-red)] hover:text-white"
                       >
                         <AlertCircle className="w-3 h-3 mr-1" />
                         Report Error
@@ -349,10 +541,10 @@ LIMIT 10;`
                         size="sm"
                         variant={selectedExplanationIndex === actualIndex ? "default" : "outline"}
                         onClick={() => handleShowExplanation(actualIndex)}
-                        className={`text-xs font-bold uppercase font-mono border-2 ${
+                        className={`text-xs font-medium ${
                           selectedExplanationIndex === actualIndex
-                            ? "bg-[var(--retro-cyan)] border-[var(--retro-cyan)] text-background shadow-[0_0_10px_rgba(100,200,255,0.5)]"
-                            : "border-[var(--retro-cyan)] text-[var(--retro-cyan)] hover:bg-[var(--retro-cyan)] hover:text-background"
+                            ? "bg-[var(--neutral-cyan)] text-white hover:bg-[var(--neutral-cyan)]/90"
+                            : "border-[var(--neutral-cyan)] text-[var(--neutral-cyan)] hover:bg-[var(--neutral-cyan)] hover:text-white"
                         }`}
                       >
                         <Info className="w-3 h-3 mr-1" />
@@ -364,23 +556,23 @@ LIMIT 10;`
               })}
             {messages.filter((m) => m.role === "assistant").length === 0 && (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                <p className="text-center font-mono">
-                  {">"} SQL queries will appear here...
+                <p className="text-center">
+                  Database queries will appear here...
                   <br />
-                  <span className="text-xs mt-2 block">{">"} Ready to be copied and executed</span>
+                  <span className="text-xs mt-2 block">Ready to be copied and executed</span>
                 </p>
               </div>
             )}
           </div>
 
           {messages.length > 0 && (
-            <div className="mt-4 pt-4 border-t-2 border-accent/30">
+            <div className="mt-4 pt-4 border-t border-border">
               <Button
                 size="sm"
                 variant="outline"
                 onClick={handleUndo}
                 disabled={messages.length === 0}
-                className="w-full text-xs font-bold uppercase font-mono border-2 border-[var(--retro-amber)] text-[var(--retro-amber)] hover:bg-[var(--retro-amber)] hover:text-background bg-transparent"
+                className="w-full text-xs font-medium border-[var(--warning-amber)] text-[var(--warning-amber)] hover:bg-[var(--warning-amber)] hover:text-white bg-transparent"
               >
                 <Undo className="w-3 h-3 mr-1" />
                 Undo Last Query
@@ -390,49 +582,48 @@ LIMIT 10;`
         </Card>
       </div>
 
-      {/* Explanation Section Below */}
       {selectedExplanationIndex !== null && messages[selectedExplanationIndex]?.role === "assistant" && (
-        <Card className="bg-card border-2 border-primary/40 p-6 shadow-[0_0_15px_rgba(120,255,120,0.3)]">
-          <div className="flex items-center gap-2 mb-4 pb-3 border-b-2 border-primary/30">
-            <div className="w-5 h-5 flex items-center justify-center">
-              <span className="text-primary text-lg drop-shadow-[0_0_8px_rgba(120,255,120,0.8)]">💡</span>
+        <Card className="bg-card border border-border p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Info className="w-4 h-4 text-primary" />
             </div>
-            <h2 className="text-lg font-bold text-primary uppercase tracking-wider font-mono">Query Explanation</h2>
+            <h2 className="text-lg font-semibold text-foreground">Query Explanation</h2>
           </div>
 
           <div className="space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="flex-shrink-0 w-6 h-6 rounded border-2 border-primary bg-primary/20 text-primary flex items-center justify-center text-xs font-bold mt-0.5 font-mono shadow-[0_0_8px_rgba(120,255,120,0.4)]">
-                {messages.filter((m, idx) => m.role === "assistant" && idx <= selectedExplanationIndex).length}
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed flex-1 font-mono">
-                {messages[selectedExplanationIndex].explanation || "This query was generated based on your prompt."}
-              </p>
-            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {messages[selectedExplanationIndex].explanation || "This query was generated based on your prompt."}
+            </p>
 
-            {messages[selectedExplanationIndex].tableVisualization && (
-              <div className="ml-9 space-y-4">
-                {messages[selectedExplanationIndex].tableVisualization!.title && (
-                  <h3 className="text-sm font-bold text-accent uppercase tracking-wide font-mono">
-                    {messages[selectedExplanationIndex].tableVisualization!.title}
+            {queryResults.has(selectedExplanationIndex) && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Query Results ({queryResults.get(selectedExplanationIndex)!.rowCount} rows)
                   </h3>
-                )}
+                  <span className="text-xs text-muted-foreground">
+                    Executed at: {queryResults.get(selectedExplanationIndex)!.executedAt}
+                  </span>
+                </div>
+                <TableVisualization
+                  data={{
+                    headers: queryResults.get(selectedExplanationIndex)!.headers,
+                    rows: queryResults.get(selectedExplanationIndex)!.rows,
+                  }}
+                />
+              </div>
+            )}
 
-                {messages[selectedExplanationIndex].tableVisualization!.before &&
-                messages[selectedExplanationIndex].tableVisualization!.after ? (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <TableVisualization
-                      data={messages[selectedExplanationIndex].tableVisualization!.before!}
-                      label="Before"
-                    />
-                    <TableVisualization
-                      data={messages[selectedExplanationIndex].tableVisualization!.after!}
-                      label="After"
-                    />
-                  </div>
-                ) : messages[selectedExplanationIndex].tableVisualization!.after ? (
-                  <TableVisualization data={messages[selectedExplanationIndex].tableVisualization!.after!} />
-                ) : null}
+            {!queryResults.has(selectedExplanationIndex) && (
+              <div className="p-6 border border-border rounded-lg bg-secondary/20">
+                <div className="text-center space-y-2">
+                  <Database className="w-8 h-8 text-muted-foreground mx-auto" />
+                  <p className="text-sm text-muted-foreground font-medium">No results yet</p>
+                  <p className="text-xs text-muted-foreground">
+                    Click "Run Query" to execute this query and see the results
+                  </p>
+                </div>
               </div>
             )}
           </div>
