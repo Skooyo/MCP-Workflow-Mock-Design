@@ -51,7 +51,7 @@ export function QueryInterface() {
   SUM(o.total_amount) as total_spent,
   COUNT(o.order_id) as order_count
 FROM customers c
-INNER JOIN orders o ON c.customer_id = o.customer_id
+INNER JOIN orders o ON c.customer_id = o.order_id
 WHERE o.order_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
   AND o.total_amount > 1000
 GROUP BY c.customer_id, c.first_name, c.last_name, c.email
@@ -615,17 +615,46 @@ LIMIT 10;`
               </div>
             )}
 
-            {!queryResults.has(selectedExplanationIndex) && (
-              <div className="p-6 border border-border rounded-lg bg-secondary/20">
-                <div className="text-center space-y-2">
-                  <Database className="w-8 h-8 text-muted-foreground mx-auto" />
-                  <p className="text-sm text-muted-foreground font-medium">No results yet</p>
-                  <p className="text-xs text-muted-foreground">
-                    Click "Run Query" to execute this query and see the results
-                  </p>
+            {!queryResults.has(selectedExplanationIndex) &&
+              messages[selectedExplanationIndex].tableVisualization?.before &&
+              messages[selectedExplanationIndex].tableVisualization?.after && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                    <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                    <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                      Sample data preview - Run the query to see actual results
+                    </p>
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      {messages[selectedExplanationIndex].tableVisualization?.title || "Sample Before & After"}
+                    </h3>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <TableVisualization
+                        data={messages[selectedExplanationIndex].tableVisualization!.before!}
+                        label="Before (Sample)"
+                      />
+                      <TableVisualization
+                        data={messages[selectedExplanationIndex].tableVisualization!.after!}
+                        label="After (Sample)"
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+
+            {!queryResults.has(selectedExplanationIndex) &&
+              !messages[selectedExplanationIndex].tableVisualization?.before && (
+                <div className="p-6 border border-border rounded-lg bg-secondary/20">
+                  <div className="text-center space-y-2">
+                    <Database className="w-8 h-8 text-muted-foreground mx-auto" />
+                    <p className="text-sm text-muted-foreground font-medium">No results yet</p>
+                    <p className="text-xs text-muted-foreground">
+                      Click "Run Query" to execute this query and see the results
+                    </p>
+                  </div>
+                </div>
+              )}
           </div>
         </Card>
       )}
