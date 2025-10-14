@@ -13,10 +13,10 @@ export default function Home() {
     // const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches
     // const shouldBeDark = savedTheme === "dark" || (!savedTheme && prefersDark)
 
-    setIsDark(shouldBeDark)
-    if (shouldBeDark) {
-      document.documentElement.classList.add("dark")
-    }
+    // setIsDark(shouldBeDark)
+    // if (shouldBeDark) {
+    //   document.documentElement.classList.add("dark")
+    // }
   }, [])
 
   const toggleTheme = () => {
